@@ -5,7 +5,7 @@
  *
  *  @section intro_sec Introduction
  *
- *  This is a library for the SHT4x Digital Humidity & Temp Sensor
+ *  This is a ESP-IDF library for the SHT4x Digital Humidity & Temp Sensor
  *
  *  Designed specifically to work with the SHT4x Digital sensor from Adafruit
  *
@@ -28,6 +28,13 @@
  */
 
 #include "Adafruit_SHT4x.h"
+#include <string.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+
+#define min(a,b) (a<b)?a:b
+#define max(a,b) (a>b)?a:b
 
 static uint8_t crc8(const uint8_t *data, int len);
 
@@ -41,7 +48,7 @@ Adafruit_SHT4x::Adafruit_SHT4x(void) {}
  */
 Adafruit_SHT4x::~Adafruit_SHT4x(void) {
   if (i2c_dev) {
-    delete i2c_dev; // remove old interface
+    i2c_master_bus_rm_device(i2c_dev);// remove old handle
   }
   if (temp_sensor) {
     delete temp_sensor;
@@ -51,6 +58,7 @@ Adafruit_SHT4x::~Adafruit_SHT4x(void) {
   }
 }
 
+
 /**
  * Initialises the I2C bus, and assigns the I2C address to us.
  *
@@ -58,9 +66,9 @@ Adafruit_SHT4x::~Adafruit_SHT4x(void) {
  *
  * @return True if initialisation was successful, otherwise False.
  */
-bool Adafruit_SHT4x::begin(TwoWire *theWire) {
+bool Adafruit_SHT4x::begin(i2c_master_bus_handle_t *i2c_bus) {
   if (i2c_dev) {
-    delete i2c_dev; // remove old interface
+    i2c_master_bus_rm_device(i2c_dev);// remove old handle
   }
   if (temp_sensor) {
     delete temp_sensor;
@@ -69,13 +77,17 @@ bool Adafruit_SHT4x::begin(TwoWire *theWire) {
     delete humidity_sensor;
   }
 
-  i2c_dev = new Adafruit_I2CDevice(SHT4x_DEFAULT_ADDR, theWire);
+  i2c_device_config_t dev_cfg = {
+    .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+    .device_address = SHT4x_DEFAULT_ADDR,
+    .scl_speed_hz = 100000,
+    .scl_wait_us = 0,
+    .flags = {.disable_ack_check = 0}
+  };
 
-  if (!i2c_dev->begin()) {
-    return false;
-  }
+  ESP_ERROR_CHECK(i2c_master_bus_add_device(*i2c_bus, &dev_cfg, &i2c_dev));
 
-  if (!reset()) {
+  if (!reset()) { //#TODO check this
     return false;
   }
 
@@ -93,11 +105,13 @@ uint32_t Adafruit_SHT4x::readSerial(void) {
   uint8_t cmd = SHT4x_READSERIAL;
   uint8_t reply[6];
 
-  if (!i2c_dev->write(&cmd, 1)) {
+  if ( ESP_OK !=   i2c_master_transmit(i2c_dev, &cmd, 1, -1) ){
     return false;
   }
-  delay(10);
-  if (!i2c_dev->read(reply, 6)) {
+
+  vTaskDelay(10000 / portTICK_PERIOD_MS);
+
+  if (ESP_OK != i2c_master_receive(i2c_dev, reply, 6, -1)) {
     return false;
   }
 
@@ -123,10 +137,12 @@ uint32_t Adafruit_SHT4x::readSerial(void) {
  */
 bool Adafruit_SHT4x::reset(void) {
   uint8_t cmd = SHT4x_SOFTRESET;
-  if (!i2c_dev->write(&cmd, 1)) {
+
+  if ( ESP_OK !=   i2c_master_transmit(i2c_dev, &cmd, 1, -1) ){
     return false;
   }
-  delay(1);
+  
+  // delay(1);
   return true;
 }
 
@@ -175,7 +191,7 @@ sht4x_heater_t Adafruit_SHT4x::getHeater(void) { return _heater; }
 /**************************************************************************/
 bool Adafruit_SHT4x::getEvent(sensors_event_t *humidity,
                               sensors_event_t *temp) {
-  uint32_t t = millis();
+  uint32_t t = esp_timer_get_time();
 
   uint8_t readbuffer[6];
   uint8_t cmd = SHT4x_NOHEAT_HIGHPRECISION;
@@ -223,11 +239,13 @@ bool Adafruit_SHT4x::getEvent(sensors_event_t *humidity,
     duration = 110;
   }
 
-  if (!i2c_dev->write(&cmd, 1)) {
+  if ( ESP_OK != i2c_master_transmit(i2c_dev, &cmd, 1, -1) ){
     return false;
   }
-  delay(duration);
-  if (!i2c_dev->read(readbuffer, 6)) {
+
+  vTaskDelay(duration / portTICK_PERIOD_MS);
+  
+  if (ESP_OK != i2c_master_receive(i2c_dev,readbuffer,6,-1)) {
     return false;
   }
 
@@ -352,13 +370,13 @@ bool Adafruit_SHT4x_Temp::getEvent(sensors_event_t *event) {
  *
  * @param cmd   The 16-bit command ID to send.
  */
-bool Adafruit_SHT4x::writeCommand(uint16_t command) {
+esp_err_t Adafruit_SHT4x::writeCommand(uint16_t command) {
   uint8_t cmd[2];
 
   cmd[0] = command >> 8;
   cmd[1] = command & 0xFF;
 
-  return i2c_dev->write(cmd, 2);
+  return i2c_master_transmit(i2c_dev, cmd, 2, -1);
 }
 
 /**
@@ -366,14 +384,15 @@ bool Adafruit_SHT4x::writeCommand(uint16_t command) {
  *
  * @param cmd   The 16-bit command ID to send.
  */
-bool Adafruit_SHT4x::readCommand(uint16_t command, uint8_t *buffer,
+esp_err_t Adafruit_SHT4x::readCommand(uint16_t command, uint8_t *buffer,
                                  uint8_t num_bytes) {
   uint8_t cmd[2];
 
   cmd[0] = command >> 8;
   cmd[1] = command & 0xFF;
 
-  return i2c_dev->write_then_read(cmd, 2, buffer, num_bytes);
+  return i2c_master_transmit_receive(i2c_dev,cmd, 2, buffer, num_bytes, -1);
+  // return i2c_dev->write_then_read(cmd, 2, buffer, num_bytes);
 }
 
 /**

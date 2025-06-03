@@ -1,7 +1,7 @@
 /*!
  *  @file Adafruit_SHT4x.h
  *
- *  This is a library for the SHT4x Digital Humidity & Temp Sensor
+ *  This is a ESP-IDF native library for the SHT4x Digital Humidity & Temp Sensor
  *
  *  Designed specifically to work with the SHT4x Humidity & Temp Sensor
  *  -----> https://www.adafruit.com/product/4885
@@ -20,9 +20,10 @@
 #ifndef ADAFRUIT_SHT4x_H
 #define ADAFRUIT_SHT4x_H
 
-#include "Arduino.h"
-#include <Adafruit_I2CDevice.h>
+#include "driver/i2c_master.h"
+#include "esp_timer.h"
 #include <Adafruit_Sensor.h>
+
 
 #define SHT4x_DEFAULT_ADDR 0x44 /**< SHT4x I2C Address */
 #define SHT4x_NOHEAT_HIGHPRECISION                                             \
@@ -113,7 +114,7 @@ public:
   Adafruit_SHT4x(void);
   ~Adafruit_SHT4x(void);
 
-  bool begin(TwoWire *theWire = &Wire);
+  bool begin(i2c_master_bus_handle_t *i2c_bus);
   uint32_t readSerial(void);
   bool reset(void);
 
@@ -133,7 +134,7 @@ protected:
   uint16_t _sensorid_humidity; ///< ID number for humidity
   uint16_t _sensorid_temp;     ///< ID number for temperature
 
-  Adafruit_I2CDevice *i2c_dev = NULL;      ///< Pointer to I2C bus interface
+  i2c_master_dev_handle_t i2c_dev;      ///< I2C bus interface
   Adafruit_SHT4x_Temp *temp_sensor = NULL; ///< Temp sensor data object
   Adafruit_SHT4x_Humidity *humidity_sensor =
       NULL; ///< Humidity sensor data object
@@ -142,8 +143,8 @@ private:
   sht4x_precision_t _precision = SHT4X_HIGH_PRECISION;
   sht4x_heater_t _heater = SHT4X_NO_HEATER;
 
-  bool writeCommand(uint16_t cmd);
-  bool readCommand(uint16_t command, uint8_t *buffer, uint8_t num_bytes);
+  esp_err_t writeCommand(uint16_t cmd);
+  esp_err_t readCommand(uint16_t command, uint8_t *buffer, uint8_t num_bytes);
 
   friend class Adafruit_SHT4x_Temp;     ///< Gives access to private members to
                                         ///< Temp data object

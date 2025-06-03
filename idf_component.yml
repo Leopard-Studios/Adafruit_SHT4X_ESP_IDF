@@ -1,0 +1,8 @@
+version: "1.0.5"
+author: Adafruit <info@adafruit.com>
+maintainer: Leopard-Studios <info@leopard-studios.co.uk>
+description: "ESP-IDF library for SHT4x temperature & humidity sensor"
+url: https://github.com/Leopard-Studios/Adafruit_SHT4X_ESP_IDF
+dependencies:
+  Adafruit_Sensor:
+    git: https://github.com/Leopard-Studios/Adafruit_Sensor_ESP_IDF.git
